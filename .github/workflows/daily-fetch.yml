@@ -1,0 +1,71 @@
+# Daily arXiv cosmic ray paper fetcher
+# arXiv 每日更新通常在 UTC 20:00 (北京时间 04:00) 发布
+# 设定在 UTC 21:00 运行，确保数据已更新
+
+name: Daily Cosmic Ray Papers
+
+on:
+  schedule:
+    - cron: '0 21 * * 1-5'  # UTC 周一至周五 21:00 (arXiv 周末不更新)
+  workflow_dispatch:          # 支持手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-papers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch cosmic ray papers from arXiv
+        run: |
+          python3 fetch_cosmicray_papers.py .
+
+      - name: Check if new file was created
+        id: check
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          if [ -f "${TODAY}.md" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "File ${TODAY}.md created successfully"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No file created for today"
+          fi
+
+      - name: Commit and push if new file exists
+        if: steps.check.outputs.found == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add *.md
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No new changes to commit"
+          else
+            TODAY=$(date -u +%Y-%m-%d)
+            git commit -m "Add arXiv papers for ${TODAY}"
+            git push
+          fi
+
+      - name: Update README with today's date
+        if: steps.check.outputs.found == 'true'
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          # Add new entry to README if not already present
+          if ! grep -q "$TODAY" README.md; then
+            sed -i "/| 日期 | 文件 |/a | ${TODAY} | [今日总结](./${TODAY}.md) |" README.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "Update README with ${TODAY} entry"
+            git push
+          fi
