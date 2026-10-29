@@ -18,6 +18,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections import Counter
 
+# 导入免费翻译 API（MyMemory）
+try:
+    from free_translator import translate as api_translate
+    USE_API_TRANSLATOR = True
+except ImportError:
+    USE_API_TRANSLATOR = False
+    print("Warning: free_translator.py not found, falling back to dictionary-only translation")
+
 
 # ============================================================================
 # 中英文术语对照表
@@ -299,7 +307,11 @@ def filter_and_enrich(papers: list[dict]) -> list[dict]:
 # 中文翻译 / 摘要提取
 # ============================================================================
 def translate_abstract_short(abstract: str, max_sentences: int = 2) -> str:
-    """Extract key sentences from abstract and translate common terms to Chinese."""
+    """Extract key sentences from abstract and translate to Chinese.
+
+    Uses MyMemory API for full translation when available, otherwise falls back
+    to dictionary-based term substitution.
+    """
     if not abstract:
         return ""
 
@@ -308,10 +320,18 @@ def translate_abstract_short(abstract: str, max_sentences: int = 2) -> str:
     key_sents = sentences[:max_sentences]
     text = " ".join(key_sents)
 
-    # Apply term mapping (longest first to avoid partial replacements)
+    # Try API translation first
+    if USE_API_TRANSLATOR:
+        try:
+            result = api_translate(text)
+            if result and result != text:
+                return result
+        except Exception:
+            pass
+
+    # Fallback: dictionary-based translation
     sorted_terms = sorted(TERM_ZH.keys(), key=len, reverse=True)
     for en, zh in [(t, TERM_ZH[t]) for t in sorted_terms]:
-        # Use word boundaries for English terms
         pattern = r'\b' + re.escape(en) + r'\b'
         text = re.sub(pattern, zh, text, flags=re.IGNORECASE)
 
@@ -750,23 +770,32 @@ PHRASE_TRANSLATIONS = {
 
 
 def translate_title(title: str) -> str:
-    """Translate title to Chinese using phrase patterns and term dictionary."""
-    result = title
+    """Translate title to Chinese.
 
-    # First apply phrase translations (case insensitive)
+    Uses MyMemory API for full sentence translation when available, otherwise
+    falls back to dictionary-based term substitution.
+    """
+    # Try API translation first (much better quality)
+    if USE_API_TRANSLATOR:
+        try:
+            result = api_translate(title)
+            if result and result != title:
+                return result
+        except Exception:
+            pass
+
+    # Fallback: dictionary-based translation
+    result = title
     for pattern, zh in PHRASE_TRANSLATIONS.items():
         result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
 
-    # Then apply term mapping (longest first to avoid partial replacements)
     sorted_terms = sorted(TERM_ZH.keys(), key=len, reverse=True)
     for en in sorted_terms:
         zh = TERM_ZH[en]
         pattern = r'\b' + re.escape(en) + r'\b'
         result = re.sub(pattern, zh, result, flags=re.IGNORECASE)
 
-    # Clean up multiple spaces and trim
     result = re.sub(r'\s+', ' ', result).strip()
-
     return result
 
 
