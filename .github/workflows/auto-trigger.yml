@@ -1,0 +1,55 @@
+# 自动检查并触发今日总结
+# 每 2 小时检查一次，如果今天的文件还没生成，就自动触发
+
+name: Auto Check & Trigger
+
+on:
+  schedule:
+    # 每 2 小时检查一次（北京时间 13:00, 15:00, 17:00, 19:00, 21:00, 23:00）
+    - cron: '0 5,7,9,11,13,15 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: read
+  actions: write  # 需要权限触发其他 workflow
+
+jobs:
+  check-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if today's summary exists
+        id: check
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          if [ -f "${TODAY}.md" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ ${TODAY}.md 已存在"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "❌ ${TODAY}.md 不存在，需要触发"
+          fi
+
+      - name: Trigger daily fetch if needed
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            console.log(`触发 daily-fetch workflow...`);
+
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'daily-fetch.yml',
+                ref: 'main'
+              });
+              console.log(`✅ 成功触发 daily-fetch workflow`);
+            } catch (error) {
+              console.error(`❌ 触发失败:`, error);
+              throw error;
+            }
